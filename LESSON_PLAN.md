@@ -112,7 +112,7 @@
 
 1. 打开 motor.py。
 2. 逐个讲解 `forward()`、`backward()`、`turn_left()`、`turn_right()`、`stop()`。
-3. 解释为什么 main.py 可以 `import motor`。
+3. 解释为什么 main.py 使用 `import mata as motor`。
 
 建议讲法：
 
@@ -121,7 +121,7 @@
 
 完成标准：
 
-- 孩子能说出 motor.py 是干什么的。
+- 孩子能说出 mata.py 是干什么的。
 - 孩子知道 main.py 为什么能调用 motor.forward()。
 
 ## 阶段 5：电机测试
@@ -141,7 +141,7 @@
 2. 打开 main.py。
 3. 运行 main.py。
 4. 观察动作顺序。
-5. 如果方向不对，修改 motor.py 后重新上传。
+5. 如果方向不对，修改 mata.py 后重新上传。
 
 建议提问：
 
@@ -152,7 +152,7 @@
 完成标准：
 
 - 小车能完成一轮基础动作。
-- 孩子知道 motor.py 和 main.py 分别负责什么。
+- 孩子知道 mata.py 和 main.py 分别负责什么。
 
 ## 阶段 6：学会停止和调试
 

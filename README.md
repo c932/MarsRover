@@ -11,7 +11,7 @@
 ## 当前代码结构
 
 - main.py：主程序（当前为教学测试入口）。
-- motor.py：电机基础控制模块。
+- mata.py：电机基础控制模块（已避开 motor 同名冲突）。
 - receiver.py：遥控输入模块样例。
 - radar.py：超声波测距模块样例。
 - blink.py：环境连通测试（LED 闪烁）。
