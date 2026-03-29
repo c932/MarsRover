@@ -318,7 +318,7 @@ for _ in range(5):
 
 ---
 
-## 第 4 章：完成电机基础模块（motor.py）
+## 第 4 章：完成电机基础模块（mata.py）
 
 原理讲解：
 
@@ -433,7 +433,7 @@ def stop():
 
 ```python
 import time
-import motor
+import mata as motor
 
 
 def run_step(name, action, duration=1.0):
@@ -576,7 +576,7 @@ forward_pin = Pin(20, Pin.IN)
 
 ```python
 import time
-import motor
+import mata as motor
 import receiver
 
 
@@ -993,7 +993,7 @@ while True:
 - 切到 `MicroPico vREPL`，按 `Ctrl+C`。
 
 3. 电机方向相反
-- 调整 `motor.py` 对应函数里的引脚高低电平。
+- 调整 `mata.py` 对应函数里的引脚高低电平。
 
 4. 超声波偶发卡住
 - 检查 `radar.py` 是否给等待 echo 的 while 加了超时。
