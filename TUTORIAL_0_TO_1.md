@@ -575,32 +575,44 @@ forward_pin = Pin(20, Pin.IN)
 代码框架 sample：
 
 ```python
-import time
-import motor
+import mata
 import receiver
+import time
 
+ACTIONS = {
+    "forward":  mata.forward,
+    "backward": mata.backward,
+    "left":     mata.turn_left,
+    "right":    mata.turn_right,
+    "stop":     mata.stop,
+}
 
-def apply_manual_command(cmd):
-    if cmd == "forward":
-        motor.forward()
-    elif cmd == "backward":
-        motor.backward()
-    elif cmd == "left":
-        motor.turn_left()
-    elif cmd == "right":
-        motor.turn_right()
-    else:
-        motor.stop()
-
+last_cmd = None
 
 try:
     while True:
         cmd = receiver.get_command()
-        apply_manual_command(cmd)
-        time.sleep(0.05)
+
+        if cmd != last_cmd:
+            mata.stop()
+            if cmd in ACTIONS:
+                ACTIONS[cmd]()
+                print(cmd)
+            else:
+                print("停止")
+            last_cmd = cmd
+
+        time.sleep_ms(50)
 except KeyboardInterrupt:
-    motor.stop()
+    mata.stop()
+    print("已停车，程序退出")
 ```
+
+设计说明：
+
+- `ACTIONS` 字典把命令字符串直接映射到函数，主循环不需要一堆 `if/elif`。
+- 只在命令**变化时**才切换电机，避免反复发送相同指令。
+- `time.sleep_ms(50)` 让轮询频率约 20 次/秒，响应灵敏且不占满 CPU。
 
 通过标准：
 
@@ -616,7 +628,7 @@ while True:
 ```
 
 - 错因：循环没有 sleep，CPU 占用过高，系统可能不稳定。
-- 建议：在循环末尾加短延时，比如 0.03 到 0.1 秒。
+- 建议：在循环末尾加短延时，比如 `time.sleep_ms(50)`。
 
 给孩子的提问卡（3 个问题）：
 
@@ -654,43 +666,48 @@ while True:
 - 返回厘米距离。
 - 带超时，避免卡死。
 
-代码框架 sample：
+代码框架 sample（与 radar.py 实现一致）：
 
 ```python
 from machine import Pin
 import time
 
-trig = Pin(14, Pin.OUT)
-echo = Pin(15, Pin.IN)
+TRIG_PIN = 14
+ECHO_PIN = 15
+
+trig = Pin(TRIG_PIN, Pin.OUT)
+echo = Pin(ECHO_PIN, Pin.IN)
 
 
-def get_distance():
-    # 1) 发送触发脉冲
+def send_pulse():
     trig.value(0)
     time.sleep_us(2)
     trig.value(1)
     time.sleep_us(10)
     trig.value(0)
 
-    # 2) 等待上升沿（带超时）
-    start_wait = time.ticks_us()
+
+def get_distance():
+    send_pulse()
+
+    timeout = 30000
+
+    # 等待 echo 升高（带超时）
+    t0 = time.ticks_us()
     while echo.value() == 0:
-        if time.ticks_diff(time.ticks_us(), start_wait) > 30000:
-            return None
+        if time.ticks_diff(time.ticks_us(), t0) > timeout:
+            return None  # 超时，无回波
 
-    pulse_start = time.ticks_us()
+    start = time.ticks_us()
 
-    # 3) 等待下降沿（带超时）
+    # 等待 echo 降低（带超时）
     while echo.value() == 1:
-        if time.ticks_diff(time.ticks_us(), pulse_start) > 30000:
-            return None
+        if time.ticks_diff(time.ticks_us(), start) > timeout:
+            return None  # 超时，物体太远或太近
 
-    pulse_end = time.ticks_us()
-
-    # 4) 转厘米
-    pulse = time.ticks_diff(pulse_end, pulse_start)
-    distance = pulse * 0.0343 / 2
-    return distance
+    duration_us = time.ticks_diff(time.ticks_us(), start)
+    distance_cm = duration_us * 0.0343 / 2
+    return round(distance_cm, 1)
 ```
 
 通过标准：
@@ -827,22 +844,61 @@ if states["forward"]:
 
 - 达成最终目标 3（手动前进遇障碍自动停止或绕行）。
 
-代码框架 sample：
+代码框架 sample（含绕行逻辑）：
 
 ```python
-def apply_safety_for_manual(cmd, distance, emergency_cm=15):
-    # 只对手动前进做前向防撞
-    if cmd == "forward" and distance is not None and distance < emergency_cm:
-        return "stop"  # 或返回 "avoid"
-    return cmd
+STOP_CM       = 20   # 前方距离小于此值时停车（厘米）
+AVOID_TURN_MS = 600  # 绕行转向持续时间（毫秒）
+AVOID_FWD_MS  = 400  # 绕行后向前走的时间（毫秒）
+
+
+def is_clear():
+    """返回前方是否畅通。"""
+    d = radar.get_distance()
+    return d is None or d > STOP_CM
+
+
+def try_avoid():
+    """先试右转，再试左转，都堵则停车。返回是否成功绕行。"""
+    # 向右探路
+    mata.turn_right()
+    time.sleep_ms(AVOID_TURN_MS)
+    mata.stop()
+    if is_clear():
+        mata.forward()
+        time.sleep_ms(AVOID_FWD_MS)
+        mata.stop()
+        return True
+
+    # 右侧不通 → 转回并继续向左转
+    mata.turn_left()
+    time.sleep_ms(AVOID_TURN_MS * 2)
+    mata.stop()
+    if is_clear():
+        mata.forward()
+        time.sleep_ms(AVOID_FWD_MS)
+        mata.stop()
+        return True
+
+    # 两侧都堵 → 转回大致原方向放弃
+    mata.turn_right()
+    time.sleep_ms(AVOID_TURN_MS)
+    mata.stop()
+    return False
 ```
 
 集成思路：
 
-1. 先读取手动命令。
-2. 再读取距离。
-3. 对手动命令做安全覆盖。
-4. 最后执行电机动作。
+1. 主循环收到 `forward` 命令时，先测距。
+2. 距离小于 `STOP_CM` → 停车并调用 `try_avoid()`。
+3. `try_avoid()` 返回 `True` → 绕行成功，继续响应遥控。
+4. 返回 `False` → 设置 `stuck = True`，停车等待手动换向。
+5. 按其他方向键时自动解除 `stuck` 状态。
+
+参数调整建议：
+
+- `STOP_CM` 越大反应越早，先从 20 cm 开始。
+- `AVOID_TURN_MS` 取决于车速，转得不够就加大。
 
 通过标准：
 
@@ -896,29 +952,104 @@ if distance < emergency_cm:
 3. `check_mode_switch(states)`
 4. `apply_safety_for_manual(cmd, distance, emergency_cm)`
 
-主循环 sample：
+最终 main.py sample（已实测）：
 
 ```python
+import receiver
+import mata
+import radar
+import time
+
+STOP_CM       = 20
+AVOID_TURN_MS = 600
+AVOID_FWD_MS  = 400
+
+ACTIONS = {
+    "forward":  mata.forward,
+    "backward": mata.backward,
+    "left":     mata.turn_left,
+    "right":    mata.turn_right,
+    "stop":     mata.stop,
+}
+
+
+def is_clear():
+    d = radar.get_distance()
+    return d is None or d > STOP_CM
+
+
+def try_avoid():
+    mata.turn_right()
+    time.sleep_ms(AVOID_TURN_MS)
+    mata.stop()
+    if is_clear():
+        mata.forward()
+        time.sleep_ms(AVOID_FWD_MS)
+        mata.stop()
+        return True
+
+    mata.turn_left()
+    time.sleep_ms(AVOID_TURN_MS * 2)
+    mata.stop()
+    if is_clear():
+        mata.forward()
+        time.sleep_ms(AVOID_FWD_MS)
+        mata.stop()
+        return True
+
+    mata.turn_right()
+    time.sleep_ms(AVOID_TURN_MS)
+    mata.stop()
+    return False
+
+
+print("遥控 + 自动避障启动")
+print("前进时距离 < {} cm 自动绕行，Ctrl+C 退出".format(STOP_CM))
+
+last_cmd = None
+stuck = False
+
 try:
     while True:
-        states = receiver.read_states()
+        cmd = receiver.get_command()
 
-        new_mode = check_mode_switch(states)
-        if new_mode is not None:
-            mode = new_mode
+        if cmd != "forward":
+            stuck = False
 
-        distance = radar.get_distance()
+        if cmd == "forward":
+            if stuck:
+                if cmd != last_cmd:
+                    print("前方受阻，请手动换向")
+                    last_cmd = cmd
+                time.sleep_ms(50)
+                continue
 
-        if mode == "AUTO":
-            run_auto_step(distance)
-        else:
-            cmd = receiver.get_command()
-            cmd = apply_safety_for_manual(cmd, distance)
-            apply_manual_command(cmd)
+            dist = radar.get_distance()
+            if dist is not None and dist <= STOP_CM:
+                mata.stop()
+                print("障碍 {:.1f} cm，尝试绕行...".format(dist))
+                if try_avoid():
+                    print("绕行成功")
+                else:
+                    print("绕行失败，停车")
+                    stuck = True
+                last_cmd = None
+                continue
 
-        time.sleep(0.05)
+        if cmd != last_cmd:
+            mata.stop()
+            if cmd in ACTIONS:
+                ACTIONS[cmd]()
+                print(cmd)
+            else:
+                print("停止")
+            last_cmd = cmd
+
+        time.sleep_ms(50)
+
 except KeyboardInterrupt:
-    motor.stop()
+    mata.stop()
+    print("已停车，程序退出")
 ```
 
 错误示例（反例）+ 为什么错：
@@ -986,14 +1117,14 @@ while True:
 
 ## 常见问题速查
 
-1. 报 `ImportError: no module named motor`
+1. 报 `ImportError: no module named mata`
 - 先右键执行 `Upload project to Pico` 再运行。
 
 2. 程序停不下来
 - 切到 `MicroPico vREPL`，按 `Ctrl+C`。
 
 3. 电机方向相反
-- 调整 `motor.py` 对应函数里的引脚高低电平。
+- 调整 `mata.py` 对应函数里的 `LEFT_MOTOR_REVERSED` / `RIGHT_MOTOR_REVERSED` 标志位。
 
 4. 超声波偶发卡住
 - 检查 `radar.py` 是否给等待 echo 的 while 加了超时。
